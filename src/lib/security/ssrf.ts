@@ -109,7 +109,7 @@ export async function validateUrl(rawUrl: string, options: { skipDns?: boolean }
       }
     }
   } catch (err: any) {
-    return { valid: false, error: `Failed to resolve domain: ${err.message}` };
+    return { valid: false, error: `Failed to resolve domain: ${err.message}. Please check your internet connection and verify the URL is accessible.` };
   }
 
   return { valid: true, sanitizedUrl: parsed.toString() };

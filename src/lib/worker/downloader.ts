@@ -26,6 +26,9 @@ export async function fetchUrlMetadata(url: string): Promise<VideoMetadata> {
     '--flat-playlist',
     '--no-warnings',
     '--no-check-certificates',
+    '--js-runtimes', 'node',
+    '--remote-components', 'ejs:github',
+    '--extractor-args', 'youtube:player_client=android,web,tv,ios',
     url,
   ];
 
@@ -108,6 +111,9 @@ export function downloadMedia(
       '--newline',
       '--no-playlist',
       '--no-check-certificates',
+      '--js-runtimes', 'node',
+      '--remote-components', 'ejs:github',
+      '--extractor-args', 'youtube:player_client=android,web,tv,ios',
       '-o', outputFilePath,
       url,
     ];
