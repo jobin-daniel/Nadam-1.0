@@ -1,0 +1,21 @@
+services:
+  video2mp3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: video2mp3-app
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - STORAGE_DIR=/app/storage
+      - MAX_FILE_SIZE_MB=500
+      - MAX_CONCURRENT_JOBS=3
+    volumes:
+      - video2mp3-storage:/app/storage
+    restart: unless-stopped
+
+volumes:
+  video2mp3-storage:
+    driver: local
