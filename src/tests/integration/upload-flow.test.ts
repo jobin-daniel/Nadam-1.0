@@ -90,3 +90,67 @@ test('Integration: Generate sample audio, convert to MP3, and verify with ffprob
   libraryRepo.delete(testId);
   assert.equal(libraryRepo.getById(testId), null);
 });
+
+test('Integration: Convert MP3 with WebP thumbnail and corrupt thumbnail fallback', async () => {
+  const testDir = path.resolve('./storage/test_samples');
+  if (!fs.existsSync(testDir)) {
+    fs.mkdirSync(testDir, { recursive: true });
+  }
+
+  const sampleWav = path.join(testDir, 'sample_sine.wav');
+  const webpThumb = path.join(testDir, 'test_thumb.webp');
+  const corruptThumb = path.join(testDir, 'corrupt_thumb.jpg');
+  const outputMp3Webp = path.join(testDir, 'out_webp_thumb.mp3');
+  const outputMp3Corrupt = path.join(testDir, 'out_corrupt_thumb.mp3');
+
+  const ffmpegStatus = await detectFfmpeg();
+  const ffmpegPath = ffmpegStatus.path!;
+
+  // 1. Generate WebP image
+  await new Promise<void>((resolve, reject) => {
+    const proc = spawn(ffmpegPath, [
+      '-y',
+      '-f', 'lavfi',
+      '-i', 'color=c=blue:s=120x120:d=1',
+      '-vframes', '1',
+      webpThumb,
+    ]);
+    proc.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`Failed to create webp: ${code}`))));
+    proc.on('error', reject);
+  });
+
+  // 2. Convert with WebP thumbnail (tests -c:v mjpeg attached_pic fix for code 234)
+  await convertToMp3({
+    inputPath: sampleWav,
+    outputPath: outputMp3Webp,
+    bitrate: '192k',
+    sampleRate: 44100,
+    thumbnailPath: webpThumb,
+    tags: { title: 'WebP Cover Test', artist: 'Tester' },
+  });
+
+  assert.ok(fs.existsSync(outputMp3Webp), 'MP3 with WebP cover should exist');
+  const dur1 = await getMediaDuration(outputMp3Webp);
+  assert.ok(dur1 > 1.5, 'Duration should be ~2s');
+
+  // 3. Write corrupted thumbnail and verify fallback doesn't crash
+  fs.writeFileSync(corruptThumb, 'not a valid image format at all');
+  await convertToMp3({
+    inputPath: sampleWav,
+    outputPath: outputMp3Corrupt,
+    bitrate: '128k',
+    sampleRate: 44100,
+    thumbnailPath: corruptThumb,
+    tags: { title: 'Corrupt Cover Test', artist: 'Tester' },
+  });
+
+  assert.ok(fs.existsSync(outputMp3Corrupt), 'MP3 with corrupt cover fallback should exist');
+  const dur2 = await getMediaDuration(outputMp3Corrupt);
+  assert.ok(dur2 > 1.5, 'Duration should be ~2s');
+
+  // Clean up
+  if (fs.existsSync(webpThumb)) fs.unlinkSync(webpThumb);
+  if (fs.existsSync(corruptThumb)) fs.unlinkSync(corruptThumb);
+  if (fs.existsSync(outputMp3Webp)) fs.unlinkSync(outputMp3Webp);
+  if (fs.existsSync(outputMp3Corrupt)) fs.unlinkSync(outputMp3Corrupt);
+});

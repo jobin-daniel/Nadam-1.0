@@ -120,7 +120,8 @@ export async function convertToMp3(options: ConvertOptions): Promise<string> {
   if (hasThumbnail) {
     args.push('-map', '0:a:0');
     args.push('-map', '1:0');
-    args.push('-c:v', 'copy');
+    args.push('-c:v', 'mjpeg');
+    args.push('-disposition:v:0', 'attached_pic');
     args.push('-id3v2_version', '3');
     args.push('-metadata:s:v', 'title=Album cover');
     args.push('-metadata:s:v', 'comment=Cover (front)');
@@ -137,43 +138,54 @@ export async function convertToMp3(options: ConvertOptions): Promise<string> {
 
   args.push(outputPath);
 
-  return new Promise((resolve, reject) => {
-    const proc = spawn(ffmpeg, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stderr = '';
+  try {
+    return await new Promise<string>((resolve, reject) => {
+      const proc = spawn(ffmpeg, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      let stderr = '';
 
-    if (abortSignal) {
-      abortSignal.addEventListener('abort', () => {
-        try { proc.kill('SIGKILL'); } catch {}
-        reject(new Error('Conversion canceled by user'));
+      if (abortSignal) {
+        abortSignal.addEventListener('abort', () => {
+          try { proc.kill('SIGKILL'); } catch {}
+          reject(new Error('Conversion canceled by user'));
+        });
+      }
+
+      const timeRegex = /time=(\d{2}:\d{2}:\d{2}(?:\.\d+)?)/;
+
+      proc.stderr.on('data', (chunk) => {
+        const text = chunk.toString();
+        stderr += text;
+
+        if (onProgress && totalDuration && totalDuration > 0) {
+          const match = timeRegex.exec(text);
+          if (match) {
+            const currentSec = parseFfmpegTime(match[1]);
+            const pct = Math.min(99, Math.round((currentSec / totalDuration) * 100));
+            onProgress(pct);
+          }
+        }
+      });
+
+      proc.on('error', (err) => {
+        reject(new Error(`ffmpeg execution error: ${err.message}`));
+      });
+
+      proc.on('close', (code) => {
+        if (code !== 0) {
+          return reject(new Error(`ffmpeg conversion failed with exit code ${code}: ${stderr.slice(-500)}`));
+        }
+        if (onProgress) onProgress(100);
+        resolve(outputPath);
+      });
+    });
+  } catch (err: any) {
+    if (hasThumbnail) {
+      console.warn(`[converter] Conversion with thumbnail failed (${err.message}). Retrying audio conversion without cover art...`);
+      return convertToMp3({
+        ...options,
+        thumbnailPath: undefined,
       });
     }
-
-    const timeRegex = /time=(\d{2}:\d{2}:\d{2}(?:\.\d+)?)/;
-
-    proc.stderr.on('data', (chunk) => {
-      const text = chunk.toString();
-      stderr += text;
-
-      if (onProgress && totalDuration && totalDuration > 0) {
-        const match = timeRegex.exec(text);
-        if (match) {
-          const currentSec = parseFfmpegTime(match[1]);
-          const pct = Math.min(99, Math.round((currentSec / totalDuration) * 100));
-          onProgress(pct);
-        }
-      }
-    });
-
-    proc.on('error', (err) => {
-      reject(new Error(`ffmpeg execution error: ${err.message}`));
-    });
-
-    proc.on('close', (code) => {
-      if (code !== 0) {
-        return reject(new Error(`ffmpeg conversion failed with exit code ${code}: ${stderr.slice(-500)}`));
-      }
-      if (onProgress) onProgress(100);
-      resolve(outputPath);
-    });
-  });
+    throw err;
+  }
 }
