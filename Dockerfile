@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     curl \
     ca-certificates \
+    zip \
     && python3 -m pip install --no-cache-dir --break-system-packages yt-dlp \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*

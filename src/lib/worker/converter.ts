@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { detectFfmpeg, detectFfprobe } from '../security/binaries';
+import { buildSpeedFilterChain } from '../audio/ffmpeg-builder';
 
 export interface ConvertOptions {
   inputPath: string;
@@ -16,6 +17,16 @@ export interface ConvertOptions {
   };
   thumbnailPath?: string;
   totalDurationSeconds?: number;
+  speedSettings?: {
+    speed: number;
+    preservePitch?: boolean;
+    pitchSemitones?: number;
+  };
+  audioEnhancements?: {
+    normalize?: boolean;
+    voiceEnhance?: boolean;
+  };
+  audioFilters?: string[];
   onProgress?: (percent: number) => void;
   abortSignal?: AbortSignal;
 }
@@ -117,6 +128,26 @@ export async function convertToMp3(options: ConvertOptions): Promise<string> {
     args.push('-b:a', bitrate);
   }
 
+  // Audio filter graph (speed, pitch, normalization, voice enhance, custom)
+  const filters: string[] = [];
+  if (options.audioFilters && options.audioFilters.length > 0) {
+    filters.push(...options.audioFilters);
+  }
+  if (options.speedSettings || options.audioEnhancements) {
+    const speedFilters = buildSpeedFilterChain({
+      speed: options.speedSettings?.speed ?? 1.0,
+      preservePitch: options.speedSettings?.preservePitch,
+      pitchSemitones: options.speedSettings?.pitchSemitones,
+      normalize: options.audioEnhancements?.normalize,
+      voiceEnhance: options.audioEnhancements?.voiceEnhance,
+    });
+    filters.push(...speedFilters);
+  }
+
+  if (filters.length > 0) {
+    args.push('-af', filters.join(','));
+  }
+
   if (hasThumbnail) {
     args.push('-map', '0:a:0');
     args.push('-map', '1:0');
@@ -151,16 +182,18 @@ export async function convertToMp3(options: ConvertOptions): Promise<string> {
       }
 
       const timeRegex = /time=(\d{2}:\d{2}:\d{2}(?:\.\d+)?)/;
+      const speed = options.speedSettings?.speed ?? 1.0;
+      const effectiveDuration = (speed && speed > 0 && totalDuration) ? (totalDuration / speed) : totalDuration;
 
       proc.stderr.on('data', (chunk) => {
         const text = chunk.toString();
         stderr += text;
 
-        if (onProgress && totalDuration && totalDuration > 0) {
+        if (onProgress && effectiveDuration && effectiveDuration > 0) {
           const match = timeRegex.exec(text);
           if (match) {
             const currentSec = parseFfmpegTime(match[1]);
-            const pct = Math.min(99, Math.round((currentSec / totalDuration) * 100));
+            const pct = Math.min(99, Math.round((currentSec / effectiveDuration) * 100));
             onProgress(pct);
           }
         }

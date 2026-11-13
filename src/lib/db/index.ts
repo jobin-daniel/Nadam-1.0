@@ -40,7 +40,10 @@ export function getDatabase(): Database.Database {
       error TEXT,
       progress_json TEXT NOT NULL,
       created_at INTEGER NOT NULL,
-      completed_at INTEGER
+      completed_at INTEGER,
+      batch_id TEXT,
+      speed_json TEXT,
+      enhancements_json TEXT
     );
 
     CREATE TABLE IF NOT EXISTS library (
@@ -74,6 +77,12 @@ export function getDatabase(): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_library_created_at ON library(created_at DESC);
   `);
+
+  // Safe migrations for existing databases
+  try { db.exec('ALTER TABLE jobs ADD COLUMN batch_id TEXT'); } catch {}
+  try { db.exec('ALTER TABLE jobs ADD COLUMN speed_json TEXT'); } catch {}
+  try { db.exec('ALTER TABLE jobs ADD COLUMN enhancements_json TEXT'); } catch {}
+  try { db.exec('CREATE INDEX IF NOT EXISTS idx_jobs_batch_id ON jobs(batch_id)'); } catch {}
 
   dbInstance = db;
   return dbInstance;

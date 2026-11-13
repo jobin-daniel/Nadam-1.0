@@ -1,12 +1,12 @@
 'use client';
 
 import React from 'react';
-import { Music2, Download, Sliders, Library, Shield, Sun, Moon, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Music2, Download, Sliders, Library, Shield, Sun, Moon, CheckCircle2, AlertCircle, Zap } from 'lucide-react';
 import { SystemEnvironmentStatus } from '@/lib/security/binaries';
 
 interface HeaderProps {
-  activeTab: 'download' | 'editor' | 'library';
-  onTabChange: (tab: 'download' | 'editor' | 'library') => void;
+  activeTab: 'download' | 'bulk' | 'editor' | 'library';
+  onTabChange: (tab: 'download' | 'bulk' | 'editor' | 'library') => void;
   envStatus: SystemEnvironmentStatus | null;
   onOpenLegal: () => void;
   isDark: boolean;
@@ -52,6 +52,18 @@ export function Header({
           >
             <Download className="w-3.5 h-3.5" />
             <span>Download</span>
+          </button>
+
+          <button
+            onClick={() => onTabChange('bulk')}
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition ${
+              activeTab === 'bulk'
+                ? 'bg-emerald-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+            }`}
+          >
+            <Zap className="w-3.5 h-3.5" />
+            <span>Bulk Convert</span>
           </button>
 
           <button

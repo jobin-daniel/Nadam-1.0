@@ -9,6 +9,7 @@ import { FileUploadZone } from '@/components/download/FileUploadZone';
 import { MetadataCard } from '@/components/download/MetadataCard';
 import { FormatOptions } from '@/components/download/FormatOptions';
 import { JobQueueList } from '@/components/download/JobQueueList';
+import { BulkConverter } from '@/components/bulk/BulkConverter';
 import { LibraryTable } from '@/components/library/LibraryTable';
 import { AudioEditor } from '@/components/editor/AudioEditor';
 import { ExportModal } from '@/components/editor/ExportModal';
@@ -18,8 +19,12 @@ import { LibraryItem } from '@/lib/types/library';
 import { SystemEnvironmentStatus } from '@/lib/security/binaries';
 import { Sparkles, Sliders, AlertCircle, Link as LinkIcon, Upload } from 'lucide-react';
 
-export default function Home() {
-  const [activeTab, setActiveTab] = useState<'download' | 'editor' | 'library'>('download');
+export default function Home({
+  initialTab,
+}: {
+  initialTab?: 'download' | 'bulk' | 'editor' | 'library';
+} = {}) {
+  const [activeTab, setActiveTab] = useState<'download' | 'bulk' | 'editor' | 'library'>(initialTab || 'download');
   const [downloadMode, setDownloadMode] = useState<'url' | 'upload'>('url');
   const [isDark, setIsDark] = useState(true);
   const [isLegalOpen, setIsLegalOpen] = useState(false);
@@ -82,6 +87,16 @@ export default function Home() {
       }
     } catch {}
   }, []);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !initialTab) {
+      const params = new URLSearchParams(window.location.search);
+      const tab = params.get('tab');
+      if (tab === 'bulk' || tab === 'download' || tab === 'editor' || tab === 'library') {
+        setActiveTab(tab);
+      }
+    }
+  }, [initialTab]);
 
   useEffect(() => {
     fetchEnv();
@@ -295,7 +310,16 @@ export default function Home() {
           </div>
         )}
 
-        {/* Tab 2: Editor */}
+        {/* Tab 2: Bulk Download & Speed Conversion */}
+        {activeTab === 'bulk' && (
+          <BulkConverter
+            envStatus={envStatus}
+            onOpenInEditor={(item) => handleOpenInEditor(item)}
+            onRefreshLibrary={fetchLibrary}
+          />
+        )}
+
+        {/* Tab 3: Editor */}
         {activeTab === 'editor' && (
           <div>
             {editorAudio ? (

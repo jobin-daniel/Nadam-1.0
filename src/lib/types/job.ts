@@ -1,6 +1,17 @@
 export type JobType = 'download' | 'upload' | 'render';
 export type JobStatus = 'queued' | 'downloading' | 'converting' | 'completed' | 'failed' | 'canceled';
 
+export interface SpeedSettings {
+  speed: number;
+  preservePitch: boolean;
+  pitchSemitones?: number;
+}
+
+export interface AudioEnhancements {
+  normalize?: boolean;
+  voiceEnhance?: boolean;
+}
+
 export interface JobProgress {
   percent: number;
   stage: 'initializing' | 'downloading' | 'converting' | 'rendering' | 'tagging' | 'completed';
@@ -27,6 +38,9 @@ export interface JobRecord {
   error?: string;
   createdAt: number;
   completedAt?: number;
+  batchId?: string;
+  speedSettings?: SpeedSettings;
+  audioEnhancements?: AudioEnhancements;
 }
 
 export interface VideoMetadata {
@@ -58,4 +72,15 @@ export interface CreateJobInput {
   artist?: string;
   album?: string;
   selectedIndices?: number[];
+}
+
+export interface BulkJobInput {
+  urls: string[];
+  speedSettings?: SpeedSettings;
+  audioEnhancements?: AudioEnhancements;
+  bitrate?: '128k' | '192k' | '256k' | '320k' | 'V0';
+  appendSpeedTag?: boolean;
+  album?: string;
+  customArtist?: string;
+  expandPlaylists?: boolean;
 }

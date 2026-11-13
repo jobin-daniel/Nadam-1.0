@@ -2,7 +2,7 @@ import EventEmitter from 'node:events';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
-import { JobRecord, JobStatus, JobProgress } from '../types/job';
+import { JobRecord, JobStatus, JobProgress, SpeedSettings, AudioEnhancements } from '../types/job';
 import { jobRepo, libraryRepo } from '../db/repository';
 import { downloadMedia, fetchUrlMetadata } from './downloader';
 import { convertToMp3, getMediaDuration } from './converter';
@@ -53,24 +53,42 @@ class JobQueueEngine extends EventEmitter {
     bitrate?: '128k' | '192k' | '256k' | '320k' | 'V0';
     tags?: { title?: string; artist?: string; album?: string };
     customTitle?: string;
+    batchId?: string;
+    speedSettings?: SpeedSettings;
+    audioEnhancements?: AudioEnhancements;
+    skipInitialMetadata?: boolean;
+    appendSpeedTag?: boolean;
   }): Promise<JobRecord> {
     const id = `job_${crypto.randomUUID().slice(0, 10)}`;
     const bitrate = params.bitrate || '320k';
 
-    // Initial metadata fetch if possible
-    let metaTitle = params.customTitle || 'Preparing Audio Download';
+    // Initial metadata fetch if possible and not explicitly skipped
+    let metaTitle = params.customTitle || (params.skipInitialMetadata ? 'Queued track...' : 'Preparing Audio Download');
     let thumbnail: string | undefined;
     let duration = 0;
     let channel: string | undefined;
 
-    try {
-      const meta = await fetchUrlMetadata(params.url);
-      metaTitle = params.customTitle || meta.title;
-      thumbnail = meta.thumbnail;
-      duration = meta.duration;
-      channel = meta.channel;
-    } catch {
-      // Will attempt directly during download
+    if (!params.skipInitialMetadata) {
+      try {
+        const meta = await fetchUrlMetadata(params.url);
+        metaTitle = params.customTitle || meta.title;
+        thumbnail = meta.thumbnail;
+        duration = meta.duration;
+        channel = meta.channel;
+      } catch {
+        // Will attempt directly during download
+      }
+    }
+
+    if (
+      params.appendSpeedTag !== false &&
+      params.speedSettings &&
+      params.speedSettings.speed !== 1.0 &&
+      metaTitle &&
+      metaTitle !== 'Queued track...' &&
+      !metaTitle.includes(`[${params.speedSettings.speed}x]`)
+    ) {
+      metaTitle = `${metaTitle} [${params.speedSettings.speed}x]`;
     }
 
     const job: JobRecord = {
@@ -86,8 +104,11 @@ class JobQueueEngine extends EventEmitter {
       title: metaTitle,
       thumbnail,
       duration,
-      channel,
+      channel: channel || params.tags?.artist,
       bitrate,
+      batchId: params.batchId,
+      speedSettings: params.speedSettings,
+      audioEnhancements: params.audioEnhancements,
       createdAt: Date.now(),
     };
 
@@ -176,6 +197,28 @@ class JobQueueEngine extends EventEmitter {
     }
 
     return false;
+  }
+
+  public cancelBatch(batchId: string): number {
+    let count = 0;
+    // 1. Cancel active jobs
+    for (const [id, ctx] of Array.from(this.activeJobs.entries())) {
+      if (ctx.job.batchId === batchId) {
+        if (this.cancelJob(id)) count++;
+      }
+    }
+    // 2. Cancel pending jobs
+    for (const id of [...this.pendingQueue]) {
+      const job = jobRepo.getById(id);
+      if (job?.batchId === batchId) {
+        if (this.cancelJob(id)) count++;
+      }
+    }
+    return count;
+  }
+
+  public listJobsByBatch(batchId: string): JobRecord[] {
+    return jobRepo.listByBatch(batchId);
   }
 
   public removeJob(
@@ -330,6 +373,31 @@ class JobQueueEngine extends EventEmitter {
   }
 
   private async runDownloadJob(job: JobRecord, abortSignal: AbortSignal) {
+    // If metadata was deferred during batch enqueue, fetch it now
+    if (job.sourceUrl && (!job.duration || job.title === 'Queued track...' || job.title === 'Preparing Audio Download')) {
+      try {
+        const meta = await fetchUrlMetadata(job.sourceUrl);
+        if (meta.title && (job.title === 'Queued track...' || job.title === 'Preparing Audio Download')) {
+          let cleanTitle = meta.title;
+          if (
+            job.speedSettings &&
+            job.speedSettings.speed !== 1.0 &&
+            !cleanTitle.includes(`[${job.speedSettings.speed}x]`)
+          ) {
+            cleanTitle = `${cleanTitle} [${job.speedSettings.speed}x]`;
+          }
+          job.title = cleanTitle;
+        }
+        if (meta.thumbnail && !job.thumbnail) job.thumbnail = meta.thumbnail;
+        if (meta.duration && !job.duration) job.duration = meta.duration;
+        if (meta.channel && !job.channel) job.channel = meta.channel;
+        jobRepo.updateStatus(job.id, job.status, job.progress);
+        this.broadcast(job);
+      } catch {
+        // Fall back to defaults
+      }
+    }
+
     const safeBase = sanitizeFilename(job.title.replace(/\.mp3$/i, ''), 'audio');
     const rawDownloadPath = path.join(this.storageDir, 'temp', `${job.id}_raw`);
     const finalMp3Path = path.join(this.storageDir, 'downloads', `${job.id}_${safeBase}.mp3`);
@@ -363,10 +431,14 @@ class JobQueueEngine extends EventEmitter {
 
     // Stage 2: Convert to MP3
     job.status = 'converting';
+    const speedMsg = job.speedSettings && job.speedSettings.speed !== 1.0
+      ? `Converting to MP3 (${job.bitrate}) @ ${job.speedSettings.speed}x speed...`
+      : `Converting to MP3 (${job.bitrate})...`;
+
     job.progress = {
       percent: 0,
       stage: 'converting',
-      message: `Converting to MP3 (${job.bitrate})...`,
+      message: speedMsg,
     };
     jobRepo.updateStatus(job.id, 'converting', job.progress);
     this.broadcast(job);
@@ -395,14 +467,19 @@ class JobQueueEngine extends EventEmitter {
       tags: {
         title: job.title,
         artist: job.channel,
+        album: job.speedSettings && job.speedSettings.speed !== 1.0 ? 'Speed Mastered' : undefined,
       },
       thumbnailPath: localThumbPath,
       totalDurationSeconds: job.duration,
+      speedSettings: job.speedSettings,
+      audioEnhancements: job.audioEnhancements,
       onProgress: (pct) => {
         job.progress = {
           percent: pct,
           stage: 'converting',
-          message: `Encoding MP3: ${pct}%`,
+          message: job.speedSettings && job.speedSettings.speed !== 1.0
+            ? `Encoding MP3 (${job.speedSettings.speed}x): ${pct}%`
+            : `Encoding MP3: ${pct}%`,
         };
         jobRepo.updateStatus(job.id, 'converting', job.progress);
         this.broadcast(job);
@@ -435,13 +512,14 @@ class JobQueueEngine extends EventEmitter {
       jobId: job.id,
       title: job.title,
       artist: job.channel,
+      album: job.speedSettings && job.speedSettings.speed !== 1.0 ? 'Speed Mastered' : undefined,
       duration: Math.round(finalDuration),
       fileSize: stats.size,
       bitrate: job.bitrate,
       filePath: finalMp3Path,
       thumbnailPath: localThumbPath,
       sourceUrl: job.sourceUrl,
-      isEdited: false,
+      isEdited: Boolean(job.speedSettings && job.speedSettings.speed !== 1.0),
       createdAt: Date.now(),
       updatedAt: Date.now(),
     });

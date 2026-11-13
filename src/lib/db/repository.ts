@@ -9,8 +9,8 @@ export const jobRepo = {
       INSERT INTO jobs (
         id, type, status, title, source_url, thumbnail, duration,
         channel, bitrate, output_path, original_path, error,
-        progress_json, created_at, completed_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        progress_json, created_at, completed_at, batch_id, speed_json, enhancements_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -28,7 +28,10 @@ export const jobRepo = {
       job.error || null,
       JSON.stringify(job.progress),
       job.createdAt,
-      job.completedAt || null
+      job.completedAt || null,
+      job.batchId || null,
+      job.speedSettings ? JSON.stringify(job.speedSettings) : null,
+      job.audioEnhancements ? JSON.stringify(job.audioEnhancements) : null
     );
   },
 
@@ -92,6 +95,9 @@ export const jobRepo = {
       originalPath: row.original_path,
       error: row.error,
       progress: JSON.parse(row.progress_json),
+      batchId: row.batch_id || undefined,
+      speedSettings: row.speed_json ? JSON.parse(row.speed_json) : undefined,
+      audioEnhancements: row.enhancements_json ? JSON.parse(row.enhancements_json) : undefined,
       createdAt: row.created_at,
       completedAt: row.completed_at,
     };
@@ -114,6 +120,34 @@ export const jobRepo = {
       originalPath: row.original_path,
       error: row.error,
       progress: JSON.parse(row.progress_json),
+      batchId: row.batch_id || undefined,
+      speedSettings: row.speed_json ? JSON.parse(row.speed_json) : undefined,
+      audioEnhancements: row.enhancements_json ? JSON.parse(row.enhancements_json) : undefined,
+      createdAt: row.created_at,
+      completedAt: row.completed_at,
+    }));
+  },
+
+  listByBatch(batchId: string): JobRecord[] {
+    const db = getDatabase();
+    const rows: any[] = db.prepare('SELECT * FROM jobs WHERE batch_id = ? ORDER BY created_at ASC').all(batchId);
+    return rows.map((row) => ({
+      id: row.id,
+      type: row.type,
+      status: row.status,
+      title: row.title,
+      sourceUrl: row.source_url,
+      thumbnail: row.thumbnail,
+      duration: row.duration,
+      channel: row.channel,
+      bitrate: row.bitrate,
+      outputPath: row.output_path,
+      originalPath: row.original_path,
+      error: row.error,
+      progress: JSON.parse(row.progress_json),
+      batchId: row.batch_id || undefined,
+      speedSettings: row.speed_json ? JSON.parse(row.speed_json) : undefined,
+      audioEnhancements: row.enhancements_json ? JSON.parse(row.enhancements_json) : undefined,
       createdAt: row.created_at,
       completedAt: row.completed_at,
     }));

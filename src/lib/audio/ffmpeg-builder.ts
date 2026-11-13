@@ -187,3 +187,58 @@ export function buildFfmpegFilterChain(
     filterString: filters.join(','),
   };
 }
+
+export interface SpeedFilterChainOptions {
+  speed: number;
+  preservePitch?: boolean;
+  pitchSemitones?: number;
+  normalize?: boolean;
+  voiceEnhance?: boolean;
+}
+
+/**
+ * Builds an optimized FFmpeg filter chain for speed conversion and optional audio enhancements
+ */
+export function buildSpeedFilterChain(options: SpeedFilterChainOptions): string[] {
+  const filters: string[] = [];
+  const speed = options.speed ?? 1.0;
+  const preservePitch = options.preservePitch !== false;
+  const pitchSemitones = options.pitchSemitones ?? 0;
+
+  // 1. Voice enhance if requested
+  if (options.voiceEnhance) {
+    filters.push('highpass=f=80');
+    filters.push('equalizer=f=3000:t=q:w=1.5:g=3.00');
+    filters.push('equalizer=f=8000:t=q:w=2.0:g=-3.00');
+  }
+
+  // 2. Pitch Shifting if requested
+  if (pitchSemitones !== 0) {
+    const semitoneRatio = Math.pow(2, pitchSemitones / 12);
+    const targetSampleRate = 44100;
+    const alteredRate = Math.round(targetSampleRate * semitoneRatio);
+    filters.push(`asetrate=${alteredRate}`);
+    const atempoComp = 1 / semitoneRatio;
+    filters.push(...buildAtempoChain(atempoComp));
+    filters.push(`aresample=${targetSampleRate}`);
+  }
+
+  // 3. Speed Shifting
+  if (speed !== 1.0 && speed > 0) {
+    if (preservePitch) {
+      filters.push(...buildAtempoChain(speed));
+    } else {
+      const targetSampleRate = 44100;
+      const alteredRate = Math.round(targetSampleRate * speed);
+      filters.push(`asetrate=${alteredRate}`);
+      filters.push(`aresample=${targetSampleRate}`);
+    }
+  }
+
+  // 4. Loudness Normalization if requested
+  if (options.normalize) {
+    filters.push('loudnorm=I=-16:TP=-1.5:LRA=11');
+  }
+
+  return filters;
+}
